@@ -5,6 +5,7 @@ from torch.nn.parameter import Parameter
 
 import numpy as np
 import numpy.random as npr
+import time
 
 from collections import namedtuple
 
@@ -17,13 +18,14 @@ from .pnqp import pnqp
 from .lqr_step import LQRStep
 from .dynamics import CtrlPassthroughDynamics
 
-
-QuadCost = namedtuple('QuadCost', 'C c')
-LinDx = namedtuple('LinDx', 'F f')
+Qfields = ('C', 'c')
+Dfields = ('F', 'f')
+QuadCost = namedtuple('QuadCost', Qfields, defaults=(None,) * len(Qfields))
+LinDx = namedtuple('LinDx', Dfields, defaults=(None,) * len(Dfields))
 
 # https://stackoverflow.com/questions/11351032
-QuadCost.__new__.__defaults__ = (None,) * len(QuadCost._fields)
-LinDx.__new__.__defaults__ = (None,) * len(LinDx._fields)
+# QuadCost.__new__.__defaults__ = (None,) * len(QuadCost._fields)
+# LinDx.__new__.__defaults__ = (None,) * len(LinDx._fields)
 
 
 class GradMethods(Enum):
@@ -252,9 +254,11 @@ class MPC(Module):
             if isinstance(dx, LinDx):
                 F, f = dx.F, dx.f
             else:
+                start = time.time()
                 F, f = self.linearize_dynamics(
                     x, util.detach_maybe(u), dx, diff=False)
-
+                end = time.time()
+                print('dynamics linearize:',end-start)
             if isinstance(cost, QuadCost):
                 C, c = cost.C, cost.c
             else:
@@ -358,9 +362,8 @@ class MPC(Module):
                 back_eps=self.back_eps,
                 no_op_forward=no_op_forward,
             )
-            e = Variable(torch.Tensor())
+            e = torch.Tensor()
             x, u = _lqr(x_init, C, c, F, f if f is not None else e)
-
             return x, u, _lqr
         else:
             nsc = self.n_state + self.n_ctrl
@@ -584,6 +587,8 @@ More details: https://github.com/locuslab/mpc.pytorch/issues/12
                             St.append(Si)
                         Rt = torch.stack(Rt)
                         St = torch.stack(St)
+                        Rt = Rt.squeeze(0)
+                        St = St.squeeze(0)
                     else:
                         assert False
 

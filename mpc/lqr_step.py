@@ -19,8 +19,8 @@ LqrForOut = namedtuple(
     'objs full_du_norm alpha_du_norm mean_alphas costs'
 )
 
-
-class LQRStep(Function):
+# @staticmethod
+class LQRStep(Module):
     """A single step of the box-constrained iLQR solver.
 
     Required Args:
@@ -44,7 +44,7 @@ class LQRStep(Function):
             u_zero_I=None,
             delta_u=None,
             linesearch_decay=0.2,
-            max_linesearch_iter=10,
+            max_linesearch_iter=1,
             true_cost=None,
             true_dynamics=None,
             delta_space=True,
@@ -54,6 +54,7 @@ class LQRStep(Function):
             back_eps=1e-3,
             no_op_forward=False,
     ):
+        super(LQRStep, self).__init__()
         self.n_state = n_state
         self.n_ctrl = n_ctrl
         self.T = T
@@ -87,10 +88,11 @@ class LQRStep(Function):
         self.no_op_forward = no_op_forward
 
     # @profile
+    # @staticmethod
     def forward(self, x_init, C, c, F, f=None):
         if self.no_op_forward:
-            self.save_for_backward(
-                x_init, C, c, F, f, self.current_x, self.current_u)
+            # self.save_for_backward(
+            #     x_init, C, c, F, f, self.current_x, self.current_u)
             return self.current_x, self.current_u
 
         if self.delta_space:
@@ -112,106 +114,106 @@ class LQRStep(Function):
         Ks, ks, self.back_out = self.lqr_backward(C, c_back, F, f_back)
         new_x, new_u, self.for_out = self.lqr_forward(
             x_init, C, c, F, f, Ks, ks)
-        self.save_for_backward(x_init, C, c, F, f, new_x, new_u)
-
+        # self.save_for_backward(x_init, C, c, F, f, new_x, new_u)
         return new_x, new_u
-
-    def backward(self, dl_dx, dl_du):
-        start = time.time()
-        x_init, C, c, F, f, new_x, new_u = self.saved_tensors
-
-        r = []
-        for t in range(self.T):
-            rt = torch.cat((dl_dx[t], dl_du[t]), 1)
-            r.append(rt)
-        r = torch.stack(r)
-
-        if self.u_lower is None:
-            I = None
-        else:
-            I = (torch.abs(new_u - self.u_lower) <= 1e-8) | \
-                (torch.abs(new_u - self.u_upper) <= 1e-8)
-        dx_init = Variable(torch.zeros_like(x_init))
-        _mpc = mpc.MPC(
-            self.n_state, self.n_ctrl, self.T,
-            u_zero_I=I,
-            u_init=None,
-            lqr_iter=1,
-            verbose=-1,
-            n_batch=C.size(1),
-            delta_u=None,
-            # exit_unconverged=True, # It's really bad if this doesn't converge.
-            exit_unconverged=False, # It's really bad if this doesn't converge.
-            eps=self.back_eps,
-        )
-        dx, du, _ = _mpc(dx_init, mpc.QuadCost(C, -r), mpc.LinDx(F, None))
-
-        dx, du = dx.data, du.data
-        dxu = torch.cat((dx, du), 2)
-        xu = torch.cat((new_x, new_u), 2)
-
-        dC = torch.zeros_like(C)
-        for t in range(self.T):
-            xut = torch.cat((new_x[t], new_u[t]), 1)
-            dxut = dxu[t]
-            dCt = -0.5*(util.bger(dxut, xut) + util.bger(xut, dxut))
-            dC[t] = dCt
-
-        dc = -dxu
-
-        lams = []
-        prev_lam = None
-        for t in range(self.T-1, -1, -1):
-            Ct_xx = C[t,:,:self.n_state,:self.n_state]
-            Ct_xu = C[t,:,:self.n_state,self.n_state:]
-            ct_x = c[t,:,:self.n_state]
-            xt = new_x[t]
-            ut = new_u[t]
-            lamt = util.bmv(Ct_xx, xt) + util.bmv(Ct_xu, ut) + ct_x
-            if prev_lam is not None:
-                Fxt = F[t,:,:,:self.n_state].transpose(1, 2)
-                lamt += util.bmv(Fxt, prev_lam)
-            lams.append(lamt)
-            prev_lam = lamt
-        lams = list(reversed(lams))
-
-        dlams = []
-        prev_dlam = None
-        for t in range(self.T-1, -1, -1):
-            dCt_xx = C[t,:,:self.n_state,:self.n_state]
-            dCt_xu = C[t,:,:self.n_state,self.n_state:]
-            drt_x = -r[t,:,:self.n_state]
-            dxt = dx[t]
-            dut = du[t]
-            dlamt = util.bmv(dCt_xx, dxt) + util.bmv(dCt_xu, dut) + drt_x
-            if prev_dlam is not None:
-                Fxt = F[t,:,:,:self.n_state].transpose(1, 2)
-                dlamt += util.bmv(Fxt, prev_dlam)
-            dlams.append(dlamt)
-            prev_dlam = dlamt
-        dlams = torch.stack(list(reversed(dlams)))
-
-        dF = torch.zeros_like(F)
-        for t in range(self.T-1):
-            xut = xu[t]
-            lamt = lams[t+1]
-
-            dxut = dxu[t]
-            dlamt = dlams[t+1]
-
-            dF[t] = -(util.bger(dlamt, xut) + util.bger(lamt, dxut))
-
-        if f.nelement() > 0:
-            _dlams = dlams[1:]
-            assert _dlams.shape == f.shape
-            df = -_dlams
-        else:
-            df = torch.Tensor()
-
-        dx_init = -dlams[0]
-
-        self.backward_time = time.time()-start
-        return dx_init, dC, dc, dF, df
+    
+    # @staticmethod
+    # def backward(self, dl_dx, dl_du):
+    #     start = time.time()
+    #     # x_init, C, c, F, f, new_x, new_u = self.saved_tensors
+    #
+    #     r = []
+    #     for t in range(self.T):
+    #         rt = torch.cat((dl_dx[t], dl_du[t]), 1)
+    #         r.append(rt)
+    #     r = torch.stack(r)
+    #
+    #     if self.u_lower is None:
+    #         I = None
+    #     else:
+    #         I = (torch.abs(new_u - self.u_lower) <= 1e-8) | \
+    #             (torch.abs(new_u - self.u_upper) <= 1e-8)
+    #     dx_init = Variable(torch.zeros_like(x_init))
+    #     _mpc = mpc.MPC(
+    #         self.n_state, self.n_ctrl, self.T,
+    #         u_zero_I=I,
+    #         u_init=None,
+    #         lqr_iter=1,
+    #         verbose=-1,
+    #         n_batch=C.size(1),
+    #         delta_u=None,
+    #         # exit_unconverged=True, # It's really bad if this doesn't converge.
+    #         exit_unconverged=False, # It's really bad if this doesn't converge.
+    #         eps=self.back_eps,
+    #     )
+    #     dx, du, _ = _mpc(dx_init, mpc.QuadCost(C, -r), mpc.LinDx(F, None))
+    #
+    #     dx, du = dx.data, du.data
+    #     dxu = torch.cat((dx, du), 2)
+    #     xu = torch.cat((new_x, new_u), 2)
+    #
+    #     dC = torch.zeros_like(C)
+    #     for t in range(self.T):
+    #         xut = torch.cat((new_x[t], new_u[t]), 1)
+    #         dxut = dxu[t]
+    #         dCt = -0.5*(util.bger(dxut, xut) + util.bger(xut, dxut))
+    #         dC[t] = dCt
+    #
+    #     dc = -dxu
+    #
+    #     lams = []
+    #     prev_lam = None
+    #     for t in range(self.T-1, -1, -1):
+    #         Ct_xx = C[t,:,:self.n_state,:self.n_state]
+    #         Ct_xu = C[t,:,:self.n_state,self.n_state:]
+    #         ct_x = c[t,:,:self.n_state]
+    #         xt = new_x[t]
+    #         ut = new_u[t]
+    #         lamt = util.bmv(Ct_xx, xt) + util.bmv(Ct_xu, ut) + ct_x
+    #         if prev_lam is not None:
+    #             Fxt = F[t,:,:,:self.n_state].transpose(1, 2)
+    #             lamt += util.bmv(Fxt, prev_lam)
+    #         lams.append(lamt)
+    #         prev_lam = lamt
+    #     lams = list(reversed(lams))
+    #
+    #     dlams = []
+    #     prev_dlam = None
+    #     for t in range(self.T-1, -1, -1):
+    #         dCt_xx = C[t,:,:self.n_state,:self.n_state]
+    #         dCt_xu = C[t,:,:self.n_state,self.n_state:]
+    #         drt_x = -r[t,:,:self.n_state]
+    #         dxt = dx[t]
+    #         dut = du[t]
+    #         dlamt = util.bmv(dCt_xx, dxt) + util.bmv(dCt_xu, dut) + drt_x
+    #         if prev_dlam is not None:
+    #             Fxt = F[t,:,:,:self.n_state].transpose(1, 2)
+    #             dlamt += util.bmv(Fxt, prev_dlam)
+    #         dlams.append(dlamt)
+    #         prev_dlam = dlamt
+    #     dlams = torch.stack(list(reversed(dlams)))
+    #
+    #     dF = torch.zeros_like(F)
+    #     for t in range(self.T-1):
+    #         xut = xu[t]
+    #         lamt = lams[t+1]
+    #
+    #         dxut = dxu[t]
+    #         dlamt = dlams[t+1]
+    #
+    #         dF[t] = -(util.bger(dlamt, xut) + util.bger(lamt, dxut))
+    #
+    #     if f.nelement() > 0:
+    #         _dlams = dlams[1:]
+    #         assert _dlams.shape == f.shape
+    #         df = -_dlams
+    #     else:
+    #         df = torch.Tensor()
+    #
+    #     dx_init = -dlams[0]
+    #
+    #     self.backward_time = time.time()-start
+    #     return dx_init, dC, dc, dF, df
 
     # @profile
     def lqr_backward(self, C, c, F, f):

@@ -14,7 +14,7 @@ def jacobian(f, x, eps):
     J = []
     for i in range(len(x)):
         J.append((f(x + eps*e[i]) - f(x - eps*e[i]))/(2.*eps))
-    J = torch.stack(J).transpose(0,1)
+    J = torch.stack(J).transpose(0,1).transpose(1,2)
     return J
 
 
