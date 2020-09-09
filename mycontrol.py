@@ -33,7 +33,10 @@ def main():
     if args.env == 'pendulum':
         T = 5
         params = torch.tensor((10., 1., 1.))  # Gravity, mass, length.
+        START = time.time()
         dx = pendulum.PendulumDx(params, simple=True)
+        END = time.time()
+        print('initialize model time:', END - START)
         xinit = torch.zeros(n_batch, dx.n_state)
         th = 1.0
         xinit[:,0] = np.cos(th)
@@ -47,8 +50,11 @@ def main():
         xinit[:,2] = np.cos(th)
         xinit[:,3] = np.sin(th)
     elif args.env == 'Gemini_flight_dynamics':
-        T = 5
+        T = 3
+        START = time.time()
         dx = Gemini_flight_dynamics.flight_dynamics(T, n_batch)
+        END = time.time()
+        print('initialize model time:', END - START)
         xinit = torch.zeros(n_batch, dx.n_state)
     else:
         assert False
@@ -79,19 +85,19 @@ def solve_lqr(dx, xinit, q, p, T,
     p = p.unsqueeze(0).repeat(T, n_batch, 1)
 
     # print(QuadCost(Q,p))
-    lqr_iter = 10 if u_init is None else 10
+    lqr_iter = 5 if u_init is None else 10
     x_lqr, u_lqr, objs_lqr = mpc.MPC(
         dx.n_state, dx.n_ctrl, T,
         u_lower=dx.lower,
         u_upper=dx.upper,
         u_init=u_init,
         lqr_iter=lqr_iter,
-        verbose=0,
+        verbose=1,
         exit_unconverged=False,
         detach_unconverged=False,
         linesearch_decay=linesearch_decay,
         max_linesearch_iter=max_linesearch_iter,
-        grad_method=GradMethods.FINITE_DIFF,
+        grad_method=GradMethods.ANALYTIC,
         eps=1e-4,
         # slew_rate_penalty=self.slew_rate_penalty,
         # prev_ctrl=prev_ctrl,

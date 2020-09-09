@@ -111,9 +111,16 @@ class LQRStep(Module):
         else:
             assert False
 
+        time1 = time.time()
         Ks, ks, self.back_out = self.lqr_backward(C, c_back, F, f_back)
+        time2 = time.time()
+        print('lqr backward time:', time2 - time1)
+        time3 = time.time()
+        print('print consume time:', time3 - time2)
         new_x, new_u, self.for_out = self.lqr_forward(
             x_init, C, c, F, f, Ks, ks)
+        time4 = time.time()
+        print('lqr forward time:', time4 - time3)
         # self.save_for_backward(x_init, C, c, F, f, new_x, new_u)
         return new_x, new_u
     

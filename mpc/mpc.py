@@ -250,7 +250,10 @@ class MPC(Module):
         for i in range(self.lqr_iter):
             u = Variable(util.detach_maybe(u), requires_grad=True)
             # Linearize the dynamics around the current trajectory.
+            # time3 = time.time()
             x = util.get_traj(self.T, u, x_init=x_init, dynamics=dx)
+            # time4 = time.time()
+            # print('get trajectory time:', time4 - time3)
             if isinstance(dx, LinDx):
                 F, f = dx.F, dx.f
             else:
@@ -310,18 +313,21 @@ class MPC(Module):
         u = torch.cat(best['u'], dim=1)
         full_du_norm = best['full_du_norm']
 
-        if isinstance(dx, LinDx):
-            F, f = dx.F, dx.f
-        else:
-            F, f = self.linearize_dynamics(x, u, dx, diff=True)
-
-        if isinstance(cost, QuadCost):
-            C, c = cost.C, cost.c
-        else:
-            C, c, _ = self.approximate_cost(x, u, cost, diff=True)
-
-        x, u, _ = self.solve_lqr_subproblem(
-            x_init, C, c, F, f, cost, dx, x, u, no_op_forward=True)
+        # if isinstance(dx, LinDx):
+        #     F, f = dx.F, dx.f
+        # else:
+        #     time1 = time.time()
+        #     F, f = self.linearize_dynamics(x, u, dx, diff=True)
+        #     time2 = time.time()
+        #     print('dynamics linearize2:', time2 - time1)
+        #
+        # if isinstance(cost, QuadCost):
+        #     C, c = cost.C, cost.c
+        # else:
+        #     C, c, _ = self.approximate_cost(x, u, cost, diff=True)
+        #
+        # x, u, _ = self.solve_lqr_subproblem(
+        #     x_init, C, c, F, f, cost, dx, x, u, no_op_forward=True)
 
         if self.detach_unconverged:
             if max(best['full_du_norm']) > self.eps:
@@ -512,10 +518,10 @@ More details: https://github.com/locuslab/mpc.pytorch/issues/12
             # modifying this code.
             # assert torch.abs(_new_x.data - torch.cat(x[1:])).max() <= 1e-6
 
-            if not diff:
-                _new_x = _new_x.data
-                _x = _x.data
-                _u = _u.data
+            # if not diff:
+            #     _new_x = _new_x.data
+            #     _x = _x.data
+            #     _u = _u.data
 
             R, S = dynamics.grad_input(_x, _u)
 
@@ -526,8 +532,8 @@ More details: https://github.com/locuslab/mpc.pytorch/issues/12
             S = S.contiguous().view(self.T-1, n_batch, self.n_state, self.n_ctrl)
             F = torch.cat((R, S), 3)
 
-            if not diff:
-                F, f = list(map(Variable, [F, f]))
+            # if not diff:
+            #     F, f = list(map(Variable, [F, f]))
             return F, f
         else:
             # TODO: This is inefficient and confusing.
