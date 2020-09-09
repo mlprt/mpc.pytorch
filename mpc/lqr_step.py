@@ -114,13 +114,11 @@ class LQRStep(Module):
         time1 = time.time()
         Ks, ks, self.back_out = self.lqr_backward(C, c_back, F, f_back)
         time2 = time.time()
-        print('lqr backward time:', time2 - time1)
         time3 = time.time()
-        print('print consume time:', time3 - time2)
         new_x, new_u, self.for_out = self.lqr_forward(
             x_init, C, c, F, f, Ks, ks)
         time4 = time.time()
-        print('lqr forward time:', time4 - time3)
+        print('lqr forward time:', time4 - time3, 'lqr backward time:', time2 -time1)
         # self.save_for_backward(x_init, C, c, F, f, new_x, new_u)
         return new_x, new_u
     
@@ -344,7 +342,7 @@ class LQRStep(Module):
         old_cost = util.get_cost(self.T, u, self.true_cost, self.true_dynamics, x=x)
 
         current_cost = None
-        alphas = torch.ones(n_batch).type_as(C)
+        # alphas = torch.ones(n_batch).type_as(C)
         full_du_norm = None
 
         i = 0
@@ -364,7 +362,8 @@ class LQRStep(Module):
                 xt = x[t]
                 ut = u[t]
                 dxt = dx[t]
-                new_ut = util.bmv(Kt, dxt) + ut + torch.diag(alphas).mm(kt)
+                # new_ut = util.bmv(Kt, dxt) + ut + torch.diag(alphas).mm(kt)
+                new_ut = util.bmv(Kt, dxt) + ut + kt
 
                 # Currently unimplemented:
                 assert not ((self.delta_u is not None) and (self.u_lower is None))
@@ -418,19 +417,19 @@ class LQRStep(Module):
                 full_du_norm = (u-new_u).transpose(1,2).contiguous().view(
                     n_batch, -1).norm(2, 1)
 
-            alphas[current_cost > old_cost] *= self.linesearch_decay
+            # alphas[current_cost > old_cost] *= self.linesearch_decay
             i += 1
 
         # If the iteration limit is hit, some alphas
         # are one step too small.
-        alphas[current_cost > old_cost] /= self.linesearch_decay
-        alpha_du_norm = (u-new_u).transpose(1,2).contiguous().view(
-            n_batch, -1).norm(2, 1)
+        # alphas[current_cost > old_cost] /= self.linesearch_decay
+        # alpha_du_norm = (u-new_u).transpose(1,2).contiguous().view(
+            # n_batch, -1).norm(2, 1)
 
         return new_x, new_u, LqrForOut(
             objs, full_du_norm,
-            alpha_du_norm,
-            torch.mean(alphas),
+            1.,
+            1.,
             current_cost
         )
 

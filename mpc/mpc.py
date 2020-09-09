@@ -251,7 +251,9 @@ class MPC(Module):
             u = Variable(util.detach_maybe(u), requires_grad=True)
             # Linearize the dynamics around the current trajectory.
             # time3 = time.time()
+            print('begin get traj')
             x = util.get_traj(self.T, u, x_init=x_init, dynamics=dx)
+            print('end get traj')
             # time4 = time.time()
             # print('get trajectory time:', time4 - time3)
             if isinstance(dx, LinDx):
@@ -300,8 +302,8 @@ class MPC(Module):
                     # ('||alpha_du||_max', max(for_out.alpha_du_norm), '{:.2e}'),
                     # TODO: alphas, total_qp_iters here is for the current
                     # iterate, not the best
-                    ('mean(alphas)', for_out.mean_alphas.item(), '{:.2e}'),
-                    ('total_qp_iters', back_out.n_total_qp_iter),
+                    # ('mean(alphas)', for_out.mean_alphas.item(), '{:.2e}'),
+                    # ('total_qp_iters', back_out.n_total_qp_iter),
                 ))
 
             if max(for_out.full_du_norm) < self.eps or \
@@ -513,16 +515,14 @@ More details: https://github.com/locuslab/mpc.pytorch/issues/12
             # This inefficiently calls dynamics again, but is worth it because
             # we can efficiently compute grad_input for every time step at once.
             _new_x = dynamics(_x, _u)
-
             # This check is a little expensive and should only be done if
             # modifying this code.
-            # assert torch.abs(_new_x.data - torch.cat(x[1:])).max() <= 1e-6
+            # assert torch.abs(_new_x.data - x[1:].view(-1, self.n_state)).max() <= 1e-6
 
             # if not diff:
             #     _new_x = _new_x.data
             #     _x = _x.data
             #     _u = _u.data
-
             R, S = dynamics.grad_input(_x, _u)
 
             f = _new_x - util.bmv(R, _x) - util.bmv(S, _u)
