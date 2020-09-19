@@ -13,13 +13,13 @@ NUM_INPUTS = (NUM_HISTORY + 1) * 13
 NUM_OUTPUTS = 18
 NUM_HIDDEN_UNITS = 200
 NUM_HIDDEN_LAYERS = 2
-NUM_ENSEMBLE = 1
-
-PATH = ['flight_model_net1_ctrl_256_1000_2layers_2his_noval.pth',
-        'flight_model_net1_ctrl_256_1000_2layers_2his_noval.pth',
-        'flight_model_net3_ctrl_256_1000_2layers_2his_noval.pth',
-        'flight_model_net4_ctrl_256_1000_2layers_2his_noval.pth',
-        'flight_model_net5_ctrl_256_1000_2layers_2his_noval.pth']
+# NUM_ENSEMBLE = 1
+#
+# PATH = ['flight_model_net1_ctrl_256_1000_2layers_2his_noval.pth',
+#         'flight_model_net1_ctrl_256_1000_2layers_2his_noval.pth',
+#         'flight_model_net3_ctrl_256_1000_2layers_2his_noval.pth',
+#         'flight_model_net4_ctrl_256_1000_2layers_2his_noval.pth',
+#         'flight_model_net5_ctrl_256_1000_2layers_2his_noval.pth']
 
 
 class Net(nn.Module):
@@ -58,15 +58,15 @@ class Net(nn.Module):
 
 
 class flight_dynamics(nn.Module):
-    def __init__(self, T, n_batch):
+    def __init__(self, T, n_batch, num_ensemble, path):
         super(flight_dynamics, self).__init__()
         self.NUM_HISTORY = NUM_HISTORY
-        self.NUM_ENSEMBLE = NUM_ENSEMBLE
+        self.NUM_ENSEMBLE = num_ensemble
         self.NUM_INPUTS = NUM_INPUTS
         self.NUM_HIDDEN_UNITS = NUM_HIDDEN_UNITS
         self.NUM_OUTPUTS = NUM_OUTPUTS
         self.NUM_HIDDEN_LAYERS = NUM_HIDDEN_LAYERS
-        self.PATH = PATH
+        self.PATH = path
         self.goal_weights = torch.cat((torch.tensor([10., 10., 10., 10., 10., 3., 2., 2., 2.]),
                                        # torch.tensor([10., 10., 10., 10., 10., 3., 2., 2., 2.]),
                                        # torch.tensor([10., 10., 10., 10., 10., 3., 2., 2., 2.]),

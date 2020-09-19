@@ -26,6 +26,19 @@ P = torch.tensor([0.06, -0.18, 0.09, 0.52])
 I = torch.tensor([0.1, -0.27, 0.4, 0.4])
 D = torch.tensor([0.001, -0.01, 0.01, 0.04])
 dt = 0.02
+NUM_ENSEMBLE_CONTROL = 1
+NUM_ENSEMBLE_PREDICT = 1
+PATH_CONTROL = ['flight_model_net1_ctrl_256_1000_2layers_2his_noval.pth',
+                'flight_model_net2_ctrl_256_1000_2layers_2his_noval.pth',
+                'flight_model_net3_ctrl_256_1000_2layers_2his_noval.pth',
+                'flight_model_net4_ctrl_256_1000_2layers_2his_noval.pth',
+                'flight_model_net5_ctrl_256_1000_2layers_2his_noval.pth']
+
+PATH_PREDICT = ['flight_model_net2_ctrl_256_1000_2layers_2his_noval.pth',
+                'flight_model_net2_ctrl_256_1000_2layers_2his_noval.pth',
+                'flight_model_net3_ctrl_256_1000_2layers_2his_noval.pth',
+                'flight_model_net4_ctrl_256_1000_2layers_2his_noval.pth',
+                'flight_model_net5_ctrl_256_1000_2layers_2his_noval.pth']
 
 def main():
     parser = argparse.ArgumentParser()
@@ -56,7 +69,8 @@ def main():
     elif args.env == 'Gemini_flight_dynamics':
         T = 5
         # START = time.time()
-        dx = Gemini_flight_dynamics.flight_dynamics(T, n_batch)
+        dx_control = Gemini_flight_dynamics.flight_dynamics(T, n_batch, NUM_ENSEMBLE_CONTROL, PATH_CONTROL)
+        dx_predict = Gemini_flight_dynamics.flight_dynamics(T, n_batch, NUM_ENSEMBLE_PREDICT, PATH_PREDICT)
         # END = time.time()
         # print('initialize model time:', END - START)
         xinit = torch.tensor([-5.8489e-03,  4.3651e-02, -7.9248e-02, -8.5625e-02,  1.1335e-02,
@@ -70,34 +84,34 @@ def main():
     else:
         assert False
 
-    q, p = dx.get_true_obj()
+    q, p = dx_control.get_true_obj()
 
-    u = dx.goal_ctrl.repeat(T, n_batch, 1)
+    u = dx_control.goal_ctrl.repeat(T, n_batch, 1)
     # u= None
     ep_length = 100
     x_plot = []
     u_plot = []
-    # error_int = torch.zeros(T, n_batch, dx.n_ctrl)
-    # prev_error = torch.zeros(T, n_batch, dx.n_ctrl)
+    # error_int = torch.zeros(T, n_batch, dx_control.n_ctrl)
+    # prev_error = torch.zeros(T, n_batch, dx_control.n_ctrl)
     for t in range(ep_length):
         start_ilqr = time.time()
         x, u = solve_lqr(
-            dx, xinit, q, p, T, dx.linesearch_decay, dx.max_linesearch_iter, u)
+            dx_control, xinit, q, p, T, dx_control.linesearch_decay, dx_control.max_linesearch_iter, u)
         end_ilqr = time.time()
         print('one step MPC:', end_ilqr - start_ilqr)
         # print('epoch:', t, '| u:', u[0])
         x_plot.append(x.detach().numpy())
         u_plot.append(u.detach().numpy())
-        # error = torch.cat((dx.goal_state[6:9], dx.goal_state[2:3])).repeat(T, n_batch, 1) - torch.cat((x[:,:,6:9], x[:,:,2:3]), dim=2)
+        # error = torch.cat((dx_control.goal_state[6:9], dx_control.goal_state[2:3])).repeat(T, n_batch, 1) - torch.cat((x[:,:,6:9], x[:,:,2:3]), dim=2)
         # error_int = util.eclamp(error_int + I * error * dt, -torch.tensor([0.5, 0.5, 0.5, 0.5]).repeat(T, n_batch, 1), torch.tensor([0.5, 0.5, 0.5, 0.5]).repeat(T, n_batch, 1))
-        # u = util.eclamp(P * error + error_int + D * (error - prev_error) / dt + dx.goal_ctrl.repeat(T, n_batch, 1), dx.lower, dx.upper)
+        # u = util.eclamp(P * error + error_int + D * (error - prev_error) / dt + dx_control.goal_ctrl.repeat(T, n_batch, 1), dx_control.lower, dx_control.upper)
         # prev_error = error
         # print('initial u:', u)
-        # xinit = dx(x[0], u[0])
-        u = torch.cat((u[1:-1], u[-2:]), 0).contiguous()
-        # u = dx.goal_ctrl.repeat(T, n_batch, 1)
+        xinit = dx_predict(x[0], u[0])
+        # u = torch.cat((u[1:-1], u[-2:]), 0).contiguous()
+        # u = dx_control.goal_ctrl.repeat(T, n_batch, 1)
         # u = u[0].repeat(T, n_batch, 1)
-        xinit = x[1]
+        # xinit = x[1]
     trajectory_plot(x_plot, T)
     action_plot(u_plot, T)
     plt.show()
@@ -144,7 +158,7 @@ def trajectory_plot(x_plot, T):
         plt.subplot(3,3,i+1)
         for j in range(len(x_plot)):
             step = np.arange(T)+j
-            plt.plot(step, x_plot[j][:,0,i])
+            plt.plot(step, x_plot[j][:, 0, i])
         plt.title(titles[i])
         # plt.legend(loc='upper right')
     # plt.show()
