@@ -144,7 +144,9 @@ def get_cost(T, u, cost, dynamics=None, x_init=None, x=None):
         ut = u[t]
         xut = torch.cat((xt, ut), 1)
         if isinstance(cost, QuadCost):
-            obj = 0.5*bquad(xut, C[t]) + bdot(xut, c[t])
+            # obj = 0.5*bquad(xut, C[t]) + bdot(xut, c[t]) + \
+            #       0.5*bquad(torch.cat((dynamics.goal_state.repeat(1,1), dynamics.goal_ctrl.repeat(1,1)), dim=1), C[t])
+            obj = 0.5 * bquad(xut - torch.cat((dynamics.goal_state.repeat(1,1), dynamics.goal_ctrl.repeat(1,1)), dim=1), C[t])
         else:
             obj = cost(xut)
         objs.append(obj)

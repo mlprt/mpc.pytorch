@@ -2,11 +2,10 @@ import torch
 from . import util
 
 # @profile
-def pnqp(H, q, lower, upper, x_init=None, n_iter=20):
+def pnqp(H, q, lower, upper, x_init=None, n_iter=10):
     GAMMA = 0.1
     n_batch, n, _ = H.size()
     pnqp_I = 1e-11*torch.eye(n).type_as(H).expand_as(H)
-
 
     def obj(x):
         return 0.5*util.bquad(x, H) + util.bdot(q, x)
@@ -17,6 +16,7 @@ def pnqp(H, q, lower, upper, x_init=None, n_iter=20):
         else:
             H_lu = H.lu()
             x_init = -q.unsqueeze(2).lu_solve(*H_lu).squeeze(2) # Clamped in the x assignment.
+            # x_init = torch.lu_solve(-q.unsqueeze(2), *H_lu).squeeze(2)
     else:
         x_init = x_init.clone() # Don't over-write the original x_init.
 
@@ -52,6 +52,7 @@ def pnqp(H, q, lower, upper, x_init=None, n_iter=20):
         else:
             H_lu_ = H_.lu()
             dx = -g_.unsqueeze(2).lu_solve(*H_lu_).squeeze(2)
+            # dx = torch.lu_solve()
 
         J = torch.norm(dx, 2, 1) >= 1e-4
         m = J.sum().item() # Number of active examples in the batch.

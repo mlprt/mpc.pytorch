@@ -141,8 +141,8 @@ class MPC(Module):
             backprop=True,
             slew_rate_penalty=None,
             prev_ctrl=None,
-            not_improved_lim=5,
-            best_cost_eps=1e-4
+            not_improved_lim=3,
+            best_cost_eps=1e-3
     ):
         super().__init__()
 
@@ -251,19 +251,19 @@ class MPC(Module):
             u = Variable(util.detach_maybe(u), requires_grad=True)
             # Linearize the dynamics around the current trajectory.
             # time3 = time.time()
-            print('begin get traj')
+            # print('begin get traj')
             x = util.get_traj(self.T, u, x_init=x_init, dynamics=dx)
-            print('end get traj')
+            # print('end get traj')
             # time4 = time.time()
             # print('get trajectory time:', time4 - time3)
             if isinstance(dx, LinDx):
                 F, f = dx.F, dx.f
             else:
-                start = time.time()
+                # start = time.time()
                 F, f = self.linearize_dynamics(
                     x, util.detach_maybe(u), dx, diff=False)
-                end = time.time()
-                print('dynamics linearize:',end-start)
+                # end = time.time()
+                # print('dynamics linearize:',end-start)
             if isinstance(cost, QuadCost):
                 C, c = cost.C, cost.c
             else:
@@ -271,10 +271,10 @@ class MPC(Module):
                     x, util.detach_maybe(u), cost, diff=False)
 
             x, u, _lqr = self.solve_lqr_subproblem(
-                x_init, C, c, F, f, cost, dx, x, u)
+                x_init, C, c, F, f, cost, dx, x, u, self.verbose)
+            # print(u)
             back_out, for_out = _lqr.back_out, _lqr.for_out
             n_not_improved += 1
-
             assert x.ndimension() == 3
             assert u.ndimension() == 3
 
@@ -283,22 +283,52 @@ class MPC(Module):
                     'x': list(torch.split(x, split_size_or_sections=1, dim=1)),
                     'u': list(torch.split(u, split_size_or_sections=1, dim=1)),
                     'costs': for_out.costs,
+                    # 'costsxx': for_out.costsxx,
+                    # 'costsuu': for_out.costsuu,
+                    # 'costsx': for_out.costsx,
+                    # 'costsu': for_out.costsu,
+                    # 'objsxx': for_out.objsxx,
+                    # 'objsuu': for_out.objsuu,
+                    # 'objsx': for_out.objsx,
+                    # 'objsu': for_out.objsu,
                     'full_du_norm': for_out.full_du_norm,
                 }
             else:
                 for j in range(n_batch):
-                    if for_out.costs[j] <= best['costs'][j] + self.best_cost_eps:
+                    if for_out.costs[j] <= best['costs'][j] - self.best_cost_eps:
                         n_not_improved = 0
                         best['x'][j] = x[:,j].unsqueeze(1)
                         best['u'][j] = u[:,j].unsqueeze(1)
                         best['costs'][j] = for_out.costs[j]
+                        # best['costsxx'][j] = for_out.costsxx[j]
+                        # best['costsuu'][j] = for_out.costsuu[j]
+                        # best['costsx'][j] = for_out.costsx[j]
+                        # best['costsu'][j] = for_out.costsu[j]
+                        # best['objsxx'][:,j] = for_out.objsxx[:,j]
+                        # best['objsuu'][:,j] = for_out.objsuu[:,j]
+                        # best['objsx'][:,j] = for_out.objsx[:,j]
+                        # best['objsu'][:,j] = for_out.objsu[:,j]
                         best['full_du_norm'][j] = for_out.full_du_norm[j]
 
             if self.verbose > 0:
                 util.table_log('lqr', (
                     ('iter', i),
                     ('mean(cost)', torch.mean(best['costs']).item(), '{:.4e}'),
-                    ('||full_du||_max', max(for_out.full_du_norm).item(), '{:.2e}'),
+                    ('mean(costxx)', torch.mean(best['costsxx']).item(), '{:.4e}'),
+                    ('mean(costuu)', torch.mean(best['costsuu']).item(), '{:.4e}'),
+                    # ('mean(costx)', torch.mean(best['costsx']).item(), '{:.4e}'),
+                    # ('mean(costu)', torch.mean(best['costsu']).item(), '{:.4e}'),
+                    ('mean(objsxx[0])', torch.mean(best['objsxx'][0], ).item(), '{:.4e}'),
+                    ('mean(objsuu[0])', torch.mean(best['objsuu'][0], ).item(), '{:.4e}'),
+                    ('mean(objsxx[1])', torch.mean(best['objsxx'][1], ).item(), '{:.4e}'),
+                    ('mean(objsuu[1])', torch.mean(best['objsuu'][1], ).item(), '{:.4e}'),
+                    ('mean(objsxx[2])', torch.mean(best['objsxx'][2], ).item(), '{:.4e}'),
+                    ('mean(objsuu[2])', torch.mean(best['objsuu'][2], ).item(), '{:.4e}'),
+                    ('mean(objsxx[3])', torch.mean(best['objsxx'][3], ).item(), '{:.4e}'),
+                    ('mean(objsuu[3])', torch.mean(best['objsuu'][3], ).item(), '{:.4e}'),
+                    # ('mean(objsxx[4])', torch.mean(best['objsxx'][4], ).item(), '{:.4e}'),
+                    # ('mean(objsuu[4])', torch.mean(best['objsuu'][4], ).item(), '{:.4e}'),
+                    # ('||full_du||_max', max(for_out.full_du_norm).item(), '{:.2e}'),
                     # ('||alpha_du||_max', max(for_out.alpha_du_norm), '{:.2e}'),
                     # TODO: alphas, total_qp_iters here is for the current
                     # iterate, not the best
@@ -349,13 +379,14 @@ class MPC(Module):
         costs = best['costs']
         return (x, u, costs)
 
-    def solve_lqr_subproblem(self, x_init, C, c, F, f, cost, dynamics, x, u,
+    def solve_lqr_subproblem(self, x_init, C, c, F, f, cost, dynamics, x, u, verbose,
                              no_op_forward=False):
         if self.slew_rate_penalty is None or isinstance(cost, Module):
             _lqr = LQRStep(
                 n_state=self.n_state,
                 n_ctrl=self.n_ctrl,
                 T=self.T,
+                verbose=verbose,
                 u_lower=self.u_lower,
                 u_upper=self.u_upper,
                 u_zero_I=self.u_zero_I,
@@ -532,8 +563,8 @@ More details: https://github.com/locuslab/mpc.pytorch/issues/12
             S = S.contiguous().view(self.T-1, n_batch, self.n_state, self.n_ctrl)
             F = torch.cat((R, S), 3)
 
-            # if not diff:
-            #     F, f = list(map(Variable, [F, f]))
+            if not diff:
+                F, f = list(map(Variable, [F, f]))
             return F, f
         else:
             # TODO: This is inefficient and confusing.
@@ -582,10 +613,10 @@ More details: https://github.com/locuslab/mpc.pytorch/issues/12
                         Rt, St = [], []
                         for i in range(n_batch):
                             Ri = util.jacobian(
-                                lambda s: dynamics(s, ut[i]), xt[i], 1e-4
+                                lambda s: dynamics(s, ut[i]), xt[i], 1e-3
                             )
                             Si = util.jacobian(
-                                lambda a : dynamics(xt[i], a), ut[i], 1e-4
+                                lambda a : dynamics(xt[i], a), ut[i], 1e-3
                             )
                             if not diff:
                                 Ri, Si = Ri.data, Si.data

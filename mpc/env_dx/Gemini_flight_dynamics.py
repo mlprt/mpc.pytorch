@@ -16,7 +16,7 @@ NUM_HIDDEN_LAYERS = 2
 NUM_ENSEMBLE = 1
 
 PATH = ['flight_model_net1_ctrl_256_1000_2layers_2his_noval.pth',
-        'flight_model_net2_ctrl_256_1000_2layers_2his_noval.pth',
+        'flight_model_net1_ctrl_256_1000_2layers_2his_noval.pth',
         'flight_model_net3_ctrl_256_1000_2layers_2his_noval.pth',
         'flight_model_net4_ctrl_256_1000_2layers_2his_noval.pth',
         'flight_model_net5_ctrl_256_1000_2layers_2his_noval.pth']
@@ -67,19 +67,30 @@ class flight_dynamics(nn.Module):
         self.NUM_OUTPUTS = NUM_OUTPUTS
         self.NUM_HIDDEN_LAYERS = NUM_HIDDEN_LAYERS
         self.PATH = PATH
-        self.goal_weights = torch.cat((torch.tensor([1., 1., 1., 0.5, 0.5, 0.5, 0.8, 0.8, 0.8]), torch.zeros(self.NUM_HISTORY * 13)))
-        self.goal_state = torch.cat((torch.tensor([0., 0., 0., 0., 0., 0., 0., 0., 0.]), torch.zeros(self.NUM_HISTORY * 13)))
-        self.ctrl_penalty = 0.001
+        self.goal_weights = torch.cat((torch.tensor([10., 10., 10., 10., 10., 3., 2., 2., 2.]),
+                                       # torch.tensor([10., 10., 10., 10., 10., 3., 2., 2., 2.]),
+                                       # torch.tensor([10., 10., 10., 10., 10., 3., 2., 2., 2.]),
+                                       torch.zeros(self.NUM_HISTORY * 13)))
+        self.goal_state = torch.cat((torch.tensor([0., 0., 0., -0.075, 0., 3.14, 0., 0., 0.]),
+                                     # torch.tensor([0., 0., 0., -0.075, 0., 3.14, 0., 0., 0.]),
+                                     # torch.tensor([0., 0., 0., -0.075, 0., 3.14, 0., 0., 0.]),
+                                     torch.zeros(self.NUM_HISTORY * 13)))
+        self.ctrl_penalty = 20.
+        self.goal_ctrl = torch.tensor([0.075, 0., 0., 0.6])
+        # self.slew_rate_penalty = torch.tensor([2., 2., 2., 2.])
+        self.slew_rate_penalty = None
         self.n_ctrl = 4
         self.n_state = self.NUM_INPUTS - self.n_ctrl
         self.n_present_state = 9
-        # self.lower = torch.tensor([-0.20, -0.1, -0.1, 0.6]).repeat(T, n_batch, 1)
-        # self.upper = torch.tensor([0.35, 0.1, 0.1, 0.8]).repeat(T, n_batch, 1)
-        self.lower = None
-        self.upper = None
+        self.lower = torch.tensor([-0.05, -0.05, -0.05, 0.65]).repeat(T, n_batch, 1)
+        self.upper = torch.tensor([0.15, 0.05, 0.05, 0.75]).repeat(T, n_batch, 1)
+        # self.delta_u = torch.tensor(0.01)
+        self.delta_u = None
+        # self.lower = None
+        # self.upper = None
         self.n_batch = n_batch
 
-        self.linesearch_decay = 0.2
+        self.linesearch_decay = 0.1
         self.max_linesearch_iter = 1
 
         self.net = {}
@@ -89,8 +100,8 @@ class flight_dynamics(nn.Module):
             self.net['obj' + str(i)] = self.net['obj'+str(i)].eval()
 
     def forward(self, x, u):
-        time1 = time.time()
-        assert x.ndimension() == u.ndimension()
+        # time1 = time.time()
+        # assert x.ndimension() == u.ndimension()
         if x.ndimension() == 1 and u.ndimension() ==1:
             x = x.unsqueeze(0)
             u = u.unsqueeze(0)
@@ -106,8 +117,8 @@ class flight_dynamics(nn.Module):
             exp_sum += exp
         z = 1/self.NUM_ENSEMBLE * exp_sum
         z = torch.cat((z, x[:,:self.NUM_HISTORY*self.n_present_state], xu[:,(self.NUM_HISTORY + 1)*self.n_present_state:(self.NUM_HISTORY + 1)*self.n_present_state + self.NUM_HISTORY * self.n_ctrl]), dim=1)
-        time2 = time.time()
-        print('model forward time:', time2 - time1)
+        # time2 = time.time()
+        # print('model forward time:', time2 - time1)
         return z
 
     def get_true_obj(self):
@@ -116,8 +127,10 @@ class flight_dynamics(nn.Module):
             self.ctrl_penalty * torch.ones(self.n_ctrl)
         ))
         assert not hasattr(self, 'mpc_lin')
-        px = -torch.sqrt(self.goal_weights) * self.goal_state  # + self.mpc_lin
-        p = torch.cat((px, torch.zeros(self.n_ctrl)))
+        # px = -torch.sqrt(self.goal_weights) * self.goal_state  # + self.mpc_lin
+        px = -self.goal_weights * self.goal_state
+        pu = -self.ctrl_penalty * torch.ones(self.n_ctrl) * self.goal_ctrl
+        p = torch.cat((px, pu))
         return q, p
 
 
