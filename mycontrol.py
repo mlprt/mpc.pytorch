@@ -3,10 +3,10 @@
 import argparse
 
 import torch
-from torch.autograd import Function, Variable
-import torch.nn.functional as F
-from torch import nn
-from torch.nn.parameter import Parameter
+# from torch.autograd import Function, Variable
+# import torch.nn.functional as F
+# from torch import nn
+# from torch.nn.parameter import Parameter
 import time
 import numpy as np
 
@@ -14,7 +14,7 @@ import os
 from collections import namedtuple
 from mpc import mpc, util
 from mpc.mpc import GradMethods
-import mpc.util as eutil
+# import mpc.util as eutil
 from mpc.env_dx import pendulum, cartpole, Gemini_flight_dynamics
 
 import matplotlib
@@ -28,17 +28,18 @@ D = torch.tensor([0.001, -0.01, 0.01, 0.04])
 dt = 0.02
 NUM_ENSEMBLE_CONTROL = 1
 NUM_ENSEMBLE_PREDICT = 1
-PATH_CONTROL = ['flight_model_net1_ctrl_256_1000_2layers_2his_noval.pth',
-                'flight_model_net2_ctrl_256_1000_2layers_2his_noval.pth',
-                'flight_model_net3_ctrl_256_1000_2layers_2his_noval.pth',
-                'flight_model_net4_ctrl_256_1000_2layers_2his_noval.pth',
-                'flight_model_net5_ctrl_256_1000_2layers_2his_noval.pth']
+PATH_CONTROL = ['pathfiles/flight_model_net1_ctrl_256_1000_2layers_2his_noval.pth',
+                'pathfiles/flight_model_net2_ctrl_256_1000_2layers_2his_noval.pth',
+                'pathfiles/flight_model_net3_ctrl_256_1000_2layers_2his_noval.pth',
+                'pathfiles/flight_model_net4_ctrl_256_1000_2layers_2his_noval.pth',
+                'pathfiles/flight_model_net5_ctrl_256_1000_2layers_2his_noval.pth']
 
-PATH_PREDICT = ['flight_model_net2_ctrl_256_1000_2layers_2his_noval.pth',
-                'flight_model_net2_ctrl_256_1000_2layers_2his_noval.pth',
-                'flight_model_net3_ctrl_256_1000_2layers_2his_noval.pth',
-                'flight_model_net4_ctrl_256_1000_2layers_2his_noval.pth',
-                'flight_model_net5_ctrl_256_1000_2layers_2his_noval.pth']
+PATH_PREDICT = ['pathfiles/flight_model_net2_ctrl_256_1000_2layers_2his_noval.pth',
+                'pathfiles/flight_model_net2_ctrl_256_1000_2layers_2his_noval.pth',
+                'pathfiles/flight_model_net3_ctrl_256_1000_2layers_2his_noval.pth',
+                'pathfiles/flight_model_net4_ctrl_256_1000_2layers_2his_noval.pth',
+                'pathfiles/flight_model_net5_ctrl_256_1000_2layers_2his_noval.pth']
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -66,6 +67,7 @@ def main():
         th = 0.5
         xinit[:,2] = np.cos(th)
         xinit[:,3] = np.sin(th)
+
     elif args.env == 'Gemini_flight_dynamics':
         T = 5
         # START = time.time()
@@ -176,6 +178,7 @@ def action_plot(u_plot, T):
             step = np.arange(T) + j
             plt.plot(step, u_plot[j][:, 0, i])
         plt.title(titles[i])
+
 
 if __name__ == '__main__':
     main()
