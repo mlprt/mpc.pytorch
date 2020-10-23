@@ -107,9 +107,9 @@ class LQRStep(Module):
             for t in range(self.T):
                 xt = self.current_x[t]
                 ut = self.current_u[t]
-                xut = torch.cat((xt, ut), 1)
+                xut = np.concatenate((xt, ut), 1)
                 c_back.append(util.bmv(C[t], xut) + c[t])
-            c_back = torch.stack(c_back)
+            c_back = np.stack(c_back)
             f_back = None
         else:
             assert False
@@ -225,7 +225,7 @@ class LQRStep(Module):
 
     # @profile
     def lqr_backward(self, C, c, F, f):
-        n_batch = C.size(1)
+        n_batch = C.shape[1]
 
         u = self.current_u
         Ks = []
@@ -239,14 +239,14 @@ class LQRStep(Module):
                 qt = c[t]
             else:
                 Ft = F[t]
-                Ft_T = Ft.transpose(1,2)
-                Qt = C[t] + Ft_T.bmm(Vtp1).bmm(Ft)
-                if f is None or f.nelement() == 0:
-                    qt = c[t] + Ft_T.bmm(vtp1.unsqueeze(2)).squeeze(2)
+                Ft_T = Ft.transpose(0,2,1)
+                Qt = C[t] + np.matmul(np.matmul(Ft_T, Vtp1), Ft)
+                if f is None or f.size == 0:
+                    qt = c[t] + np.matmul(Ft_T, np.expand_dims(vtp1, 2)).squeeze()
                 else:
                     ft = f[t]
-                    qt = c[t] + Ft_T.bmm(Vtp1).bmm(ft.unsqueeze(2)).squeeze(2) + \
-                        Ft_T.bmm(vtp1.unsqueeze(2)).squeeze(2)
+                    qt = c[t] + np.matmul(np.matmul(Ft_T, Vtp1), np.expand_dims(ft, 2)).squeeze() + \
+                        np.matmul(Ft_T, np.expand_dims(vtp1, 2)).squeeze()
 
             n_state = self.n_state
             Qt_xx = Qt[:, :n_state, :n_state]
@@ -262,11 +262,8 @@ class LQRStep(Module):
                     kt = -(1./Qt_uu.squeeze(2))*qt_u
                 else:
                     if self.u_zero_I is None:
-                        Qt_uu_inv = [
-                            torch.pinverse(Qt_uu[i]) for i in range(Qt_uu.shape[0])
-                        ]
-                        Qt_uu_inv = torch.stack(Qt_uu_inv)
-                        Kt = -Qt_uu_inv.bmm(Qt_ux)
+                        Qt_uu_inv = np.linalg.inv(Qt_uu)
+                        Kt = np.matmul(-Qt_uu_inv, Qt_ux)
                         kt = util.bmv(-Qt_uu_inv, qt_u)
 
                         # Qt_uu_LU = Qt_uu.lu()
@@ -277,10 +274,10 @@ class LQRStep(Module):
                         I = self.u_zero_I[t].float()
                         notI = 1-I
 
-                        qt_u_ = qt_u.clone()
+                        qt_u_ = qt_u.copy()
                         qt_u_[I.bool()] = 0
 
-                        Qt_uu_ = Qt_uu.clone()
+                        Qt_uu_ = Qt_uu.copy()
 
                         if I.is_cuda:
                             notI_ = notI.float()
@@ -291,8 +288,8 @@ class LQRStep(Module):
                         Qt_uu_[Qt_uu_I.bool()] = 0.
                         Qt_uu_[util.bdiag(I).bool()] += 1e-8
 
-                        Qt_ux_ = Qt_ux.clone()
-                        Qt_ux_[I.unsqueeze(2).repeat(1,1,Qt_ux.size(2)).bool()] = 0.
+                        Qt_ux_ = Qt_ux.copy()
+                        Qt_ux_[np.expand_dims(I, 2).repeat(Qt_ux.shape[2], 2).bool()] = 0.
 
                         if self.n_ctrl == 1:
                             Kt = -(1./Qt_uu_)*Qt_ux_
@@ -323,45 +320,44 @@ class LQRStep(Module):
             #     else:
             #         Kt = -Qt_ux_.lu_solve(*Qt_uu_free_LU)
             else:
-                Qt_uu_inv = [
-                    torch.pinverse(Qt_uu[i]) for i in range(Qt_uu.shape[0])
-                ]
-                Qt_uu_inv = torch.stack(Qt_uu_inv)
-                Kt = -Qt_uu_inv.bmm(Qt_ux)
+                Qt_uu_inv = np.linalg.inv(Qt_uu)
+                # print(Qt_uu_inv.dtype)
+                Kt = np.matmul(-Qt_uu_inv, Qt_ux)
                 kt = util.bmv(-Qt_uu_inv, qt_u)
-            Kt_T = Kt.transpose(1,2)
+            Kt_T = Kt.transpose(0,2,1)
 
             Ks.append(Kt)
             ks.append(kt)
 
-            Vtp1 = Qt_xx + Qt_xu.bmm(Kt) + Kt_T.bmm(Qt_ux) + Kt_T.bmm(Qt_uu).bmm(Kt)
-            vtp1 = qt_x + Qt_xu.bmm(kt.unsqueeze(2)).squeeze(2) + \
-                Kt_T.bmm(qt_u.unsqueeze(2)).squeeze(2) + \
-                Kt_T.bmm(Qt_uu).bmm(kt.unsqueeze(2)).squeeze(2)
+            Vtp1 = Qt_xx + np.matmul(Qt_xu, Kt) + np.matmul(Kt_T, Qt_ux) + np.matmul(np.matmul(Kt_T, Qt_uu), Kt)
+            vtp1 = qt_x + np.matmul(Qt_xu, np.expand_dims(kt, 2)).squeeze(2) + \
+                np.matmul(Kt_T, np.expand_dims(qt_u, 2)).squeeze(2) + \
+                np.matmul(np.matmul(Kt_T, Qt_uu), np.expand_dims(kt, 2)).squeeze(2)
 
         return Ks, ks, LqrBackOut(n_total_qp_iter=n_total_qp_iter)
 
 
     # @profile
     def lqr_forward(self, x_init, C, c, F, f, Ks, ks):
+        # print(Ks[0].dtype, Ks[1].dtype, Ks[2].dtype, Ks[3].dtype, Ks[4].dtype)
         x = self.current_x
         u = self.current_u
-        n_batch = C.size(1)
+        n_batch = C.shape[1]
 
         old_cost = util.get_cost(self.T, u, self.true_cost, self.true_dynamics, x=x)
 
         current_cost = None
-        alphas = torch.ones(n_batch).type_as(C)
+        alphas = np.ones(n_batch, dtype='single')
         full_du_norm = None
 
         i = 0
         while (current_cost is None or \
                (old_cost is not None and \
-                  torch.any((current_cost > old_cost)).cpu().item() == 1)) and \
+                  np.any((current_cost > old_cost)).item() == 1)) and \
               i < self.max_linesearch_iter:
             new_u = []
             new_x = [x_init]
-            dx = [torch.zeros_like(x_init)]
+            dx = [np.zeros_like(x_init)]
             objs = []
             objsxx = []
             objsuu = []
@@ -375,7 +371,7 @@ class LQRStep(Module):
                 xt = x[t]
                 ut = u[t]
                 dxt = dx[t]
-                new_ut = util.bmv(Kt, dxt) + ut + torch.diag(alphas).mm(kt)
+                new_ut = util.bmv(Kt, dxt) + ut + np.matmul(np.diag(alphas), kt)
                 # new_ut = util.bmv(Kt, dxt) + ut + kt
 
                 # Currently unimplemented:
@@ -399,7 +395,7 @@ class LQRStep(Module):
                     new_ut = util.eclamp(new_ut, lb, ub)
                 new_u.append(new_ut)
 
-                new_xut = torch.cat((new_xt, new_ut), dim=1)
+                new_xut = np.concatenate((new_xt, new_ut), axis=1)
                 if t < self.T-1:
                     if isinstance(self.true_dynamics, mpc.LinDx):
                         F, f = self.true_dynamics.F, self.true_dynamics.f
@@ -407,8 +403,9 @@ class LQRStep(Module):
                         if f is not None and f.nelement() > 0:
                             new_xtp1 += f[t]
                     else:
+                        # print(new_xt.dtype, new_ut.dtype)
                         new_xtp1 = self.true_dynamics(
-                            Variable(new_xt), Variable(new_ut)).data
+                            new_xt, new_ut)
 
                     new_x.append(new_xtp1)
                     dx.append(new_xtp1 - x[t+1])
@@ -420,13 +417,13 @@ class LQRStep(Module):
                         Cuu = C[:, :, self.n_state:, self.n_state:]
                         cx = c[:, :, :self.n_state]
                         cu = c[:, :, self.n_state:]
-                        objxx = 0.5*util.bquad(new_xt - self.true_dynamics.goal_state.repeat(1,1), Cxx[t])
-                        objuu = 0.5*util.bquad(new_ut - self.true_dynamics.goal_ctrl.repeat(1,1), Cuu[t])
+                        objxx = 0.5*util.bquad(new_xt - np.expand_dims(self.true_dynamics.goal_state, 0), Cxx[t])
+                        objuu = 0.5*util.bquad(new_ut - np.expand_dims(self.true_dynamics.goal_ctrl, 0), Cuu[t])
                         # objx = util.bdot(new_xt, cx[t])
                         # obju = util.bdot(new_ut, cu[t])
                     # obj = 0.5*util.bquad(new_xut, C[t]) + util.bdot(new_xut, c[t]) + \
                     #       0.5*util.bquad(torch.cat((self.true_dynamics.goal_state.repeat(1,1), self.true_dynamics.goal_ctrl.repeat(1,1)), dim=1), C[t])
-                    obj = 0.5*util.bquad(new_xut - torch.cat((self.true_dynamics.goal_state.repeat(1,1), self.true_dynamics.goal_ctrl.repeat(1,1)), dim=1), C[t])
+                    obj = 0.5*util.bquad(new_xut - np.concatenate((np.expand_dims(self.true_dynamics.goal_state, 0), np.expand_dims(self.true_dynamics.goal_ctrl, 0)), axis=1), C[t])
                 else:
                     obj = self.true_cost(new_xut)
 
@@ -437,21 +434,21 @@ class LQRStep(Module):
                     # objsu.append(obju)
                 objs.append(obj)
             if self.verbose > 0:
-                objsxx = torch.stack(objsxx)
-                objsuu = torch.stack(objsuu)
+                objsxx = np.stack(objsxx)
+                objsuu = np.stack(objsuu)
                 # objsx = torch.stack(objsx)
                 # objsu = torch.stack(objsu)
-                current_costxx = torch.sum(objsxx, dim=0)
-                current_costuu = torch.sum(objsuu, dim=0)
+                current_costxx = np.sum(objsxx, axis=0)
+                current_costuu = np.sum(objsuu, axis=0)
                 # current_costx = torch.sum(objsx, dim=0)
                 # current_costu = torch.sum(objsu, dim=0)
-            objs = torch.stack(objs)
-            current_cost = torch.sum(objs, dim=0)
-            new_u = torch.stack(new_u)
-            new_x = torch.stack(new_x)
+            objs = np.stack(objs)
+            current_cost = np.sum(objs, axis=0)
+            new_u = np.stack(new_u)
+            new_x = np.stack(new_x)
             if full_du_norm is None:
-                full_du_norm = (u-new_u).transpose(1,2).contiguous().view(
-                    n_batch, -1).norm(2, 1)
+                full_du_norm = np.linalg.norm((u-new_u).transpose(0,2,1).reshape(
+                    n_batch, -1), ord=2, axis=1)
 
             alphas[current_cost > old_cost] *= self.linesearch_decay
             i += 1
@@ -459,14 +456,14 @@ class LQRStep(Module):
         # If the iteration limit is hit, some alphas
         # are one step too small.
         alphas[current_cost > old_cost] /= self.linesearch_decay
-        alpha_du_norm = (u-new_u).transpose(1,2).contiguous().view(
-            n_batch, -1).norm(2, 1)
+        alpha_du_norm = np.linalg.norm((u-new_u).transpose(0,2,1).reshape(
+            n_batch, -1), ord=2, axis=1)
 
         return new_x, new_u, LqrForOut(
             objs,
             full_du_norm,
             alpha_du_norm,
-            torch.mean(alphas),
+            np.mean(alphas),
             current_cost,
         )
 

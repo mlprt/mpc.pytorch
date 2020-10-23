@@ -155,14 +155,16 @@ class MPC(Module):
         self.u_lower = u_lower
         self.u_upper = u_upper
 
-        if not isinstance(u_lower, float):
-            self.u_lower = util.detach_maybe(self.u_lower)
+        # if not isinstance(u_lower, float):
+        #     self.u_lower = util.detach_maybe(self.u_lower)
+        #
+        # if not isinstance(u_upper, float):
+        #     self.u_upper = util.detach_maybe(self.u_upper)
 
-        if not isinstance(u_upper, float):
-            self.u_upper = util.detach_maybe(self.u_upper)
-
-        self.u_zero_I = util.detach_maybe(u_zero_I)
-        self.u_init = util.detach_maybe(u_init)
+        # self.u_zero_I = util.detach_maybe(u_zero_I)
+        # self.u_init = util.detach_maybe(u_init)
+        self.u_zero_I = u_zero_I
+        self.u_init = u_init
         self.lqr_iter = lqr_iter
         self.grad_method = grad_method
         self.delta_u = delta_u
@@ -194,8 +196,8 @@ class MPC(Module):
         # TODO: Clean up inferences, expansions, and assumptions made here.
         if self.n_batch is not None:
             n_batch = self.n_batch
-        elif isinstance(cost, QuadCost) and cost.C.ndimension() == 4:
-            n_batch = cost.C.size(1)
+        elif isinstance(cost, QuadCost) and cost.C.ndim == 4:
+            n_batch = cost.C.shape[1]
         else:
             print('MPC Error: Could not infer batch size, pass in as n_batch')
             sys.exit(-1)
@@ -206,49 +208,46 @@ class MPC(Module):
 
         if isinstance(cost, QuadCost):
             C, c = cost
-            if C.ndimension() == 2:
+            if C.ndim == 2:
                 # Add the time and batch dimensions.
-                C = C.unsqueeze(0).unsqueeze(0).expand(
-                    self.T, n_batch, self.n_state+self.n_ctrl, -1)
-            elif C.ndimension() == 3:
+                C = np.tile(C, (self.T, n_batch, 1, 1))
+            elif C.ndim == 3:
                 # Add the batch dimension.
-                C = C.unsqueeze(1).expand(
-                    self.T, n_batch, self.n_state+self.n_ctrl, -1)
+                C = np.tile(np.expand_dims(C, 1), (1, n_batch, 1, 1))
 
-            if c.ndimension() == 1:
+            if c.ndim == 1:
                 # Add the time and batch dimensions.
-                c = c.unsqueeze(0).unsqueeze(0).expand(self.T, n_batch, -1)
-            elif c.ndimension() == 2:
+                c = np.tile(c, (self.T, n_batch, 1))
+            elif c.ndim == 2:
                 # Add the batch dimension.
-                c = c.unsqueeze(1).expand(self.T, n_batch, -1)
+                c = np.tile(np.expand_dims(c, 1), (1, n_batch, 1))
 
-            if C.ndimension() != 4 or c.ndimension() != 3:
+            if C.ndim != 4 or c.ndim != 3:
                 print('MPC Error: Unexpected QuadCost shape.')
                 sys.exit(-1)
             cost = QuadCost(C, c)
 
-        assert x_init.ndimension() == 2 and x_init.size(0) == n_batch
+        assert x_init.ndim == 2 and x_init.shape[0] == n_batch
 
         if self.u_init is None:
-            u = torch.zeros(self.T, n_batch, self.n_ctrl).type_as(x_init.data)
+            u = np.zeros((self.T, n_batch, self.n_ctrl), dtype='single')
         else:
             u = self.u_init
-            if u.ndimension() == 2:
-                u = u.unsqueeze(1).expand(self.T, n_batch, -1).clone()
-        u = u.type_as(x_init.data)
+            if u.ndim == 2:
+                u = np.tile(np.expand_dims(u, 1), (1, n_batch, 1))
 
         if self.verbose > 0:
             print('Initial mean(cost): {:.4e}'.format(
-                torch.mean(util.get_cost(
+                np.mean(util.get_cost(
                     self.T, u, cost, dx, x_init=x_init
-                )).item()
+                ))
             ))
 
         best = None
 
         n_not_improved = 0
         for i in range(self.lqr_iter):
-            u = Variable(util.detach_maybe(u), requires_grad=True)
+            u = u
             # Linearize the dynamics around the current trajectory.
             # time3 = time.time()
             # print('begin get traj')
@@ -261,27 +260,27 @@ class MPC(Module):
             else:
                 # start = time.time()
                 F, f = self.linearize_dynamics(
-                    x, util.detach_maybe(u), dx, diff=False)
+                    x, u, dx, diff=False)
                 # end = time.time()
                 # print('dynamics linearize:',end-start)
             if isinstance(cost, QuadCost):
                 C, c = cost.C, cost.c
             else:
                 C, c, _ = self.approximate_cost(
-                    x, util.detach_maybe(u), cost, diff=False)
+                    x, u, cost, diff=False)
 
             x, u, _lqr = self.solve_lqr_subproblem(
                 x_init, C, c, F, f, cost, dx, x, u, self.verbose)
             # print(u)
             back_out, for_out = _lqr.back_out, _lqr.for_out
             n_not_improved += 1
-            assert x.ndimension() == 3
-            assert u.ndimension() == 3
+            assert x.ndim == 3
+            assert u.ndim == 3
 
             if best is None:
                 best = {
-                    'x': list(torch.split(x, split_size_or_sections=1, dim=1)),
-                    'u': list(torch.split(u, split_size_or_sections=1, dim=1)),
+                    'x': list(np.split(x, indices_or_sections=1, axis=1)),
+                    'u': list(np.split(u, indices_or_sections=1, axis=1)),
                     'costs': for_out.costs,
                     # 'costsxx': for_out.costsxx,
                     # 'costsuu': for_out.costsuu,
@@ -297,8 +296,8 @@ class MPC(Module):
                 for j in range(n_batch):
                     if for_out.costs[j] <= best['costs'][j] - self.best_cost_eps:
                         n_not_improved = 0
-                        best['x'][j] = x[:,j].unsqueeze(1)
-                        best['u'][j] = u[:,j].unsqueeze(1)
+                        best['x'][j] = np.expand_dims(x[:,j], 1)
+                        best['u'][j] = np.expand_dims(u[:,j], 1)
                         best['costs'][j] = for_out.costs[j]
                         # best['costsxx'][j] = for_out.costsxx[j]
                         # best['costsuu'][j] = for_out.costsuu[j]
@@ -313,21 +312,21 @@ class MPC(Module):
             if self.verbose > 0:
                 util.table_log('lqr', (
                     ('iter', i),
-                    ('mean(cost)', torch.mean(best['costs']).item(), '{:.4e}'),
-                    ('mean(costxx)', torch.mean(best['costsxx']).item(), '{:.4e}'),
-                    ('mean(costuu)', torch.mean(best['costsuu']).item(), '{:.4e}'),
-                    # ('mean(costx)', torch.mean(best['costsx']).item(), '{:.4e}'),
-                    # ('mean(costu)', torch.mean(best['costsu']).item(), '{:.4e}'),
-                    ('mean(objsxx[0])', torch.mean(best['objsxx'][0], ).item(), '{:.4e}'),
-                    ('mean(objsuu[0])', torch.mean(best['objsuu'][0], ).item(), '{:.4e}'),
-                    ('mean(objsxx[1])', torch.mean(best['objsxx'][1], ).item(), '{:.4e}'),
-                    ('mean(objsuu[1])', torch.mean(best['objsuu'][1], ).item(), '{:.4e}'),
-                    ('mean(objsxx[2])', torch.mean(best['objsxx'][2], ).item(), '{:.4e}'),
-                    ('mean(objsuu[2])', torch.mean(best['objsuu'][2], ).item(), '{:.4e}'),
-                    ('mean(objsxx[3])', torch.mean(best['objsxx'][3], ).item(), '{:.4e}'),
-                    ('mean(objsuu[3])', torch.mean(best['objsuu'][3], ).item(), '{:.4e}'),
-                    # ('mean(objsxx[4])', torch.mean(best['objsxx'][4], ).item(), '{:.4e}'),
-                    # ('mean(objsuu[4])', torch.mean(best['objsuu'][4], ).item(), '{:.4e}'),
+                    ('mean(cost)', np.mean(best['costs']).item(), '{:.4e}'),
+                    ('mean(costxx)', np.mean(best['costsxx']).item(), '{:.4e}'),
+                    ('mean(costuu)', np.mean(best['costsuu']).item(), '{:.4e}'),
+                    # ('mean(costx)', np.mean(best['costsx']).item(), '{:.4e}'),
+                    # ('mean(costu)', np.mean(best['costsu']).item(), '{:.4e}'),
+                    ('mean(objsxx[0])', np.mean(best['objsxx'][0], ).item(), '{:.4e}'),
+                    ('mean(objsuu[0])', np.mean(best['objsuu'][0], ).item(), '{:.4e}'),
+                    ('mean(objsxx[1])', np.mean(best['objsxx'][1], ).item(), '{:.4e}'),
+                    ('mean(objsuu[1])', np.mean(best['objsuu'][1], ).item(), '{:.4e}'),
+                    ('mean(objsxx[2])', np.mean(best['objsxx'][2], ).item(), '{:.4e}'),
+                    ('mean(objsuu[2])', np.mean(best['objsuu'][2], ).item(), '{:.4e}'),
+                    ('mean(objsxx[3])', np.mean(best['objsxx'][3], ).item(), '{:.4e}'),
+                    ('mean(objsuu[3])', np.mean(best['objsuu'][3], ).item(), '{:.4e}'),
+                    # ('mean(objsxx[4])', np.mean(best['objsxx'][4], ).item(), '{:.4e}'),
+                    # ('mean(objsuu[4])', np.mean(best['objsuu'][4], ).item(), '{:.4e}'),
                     # ('||full_du||_max', max(for_out.full_du_norm).item(), '{:.2e}'),
                     # ('||alpha_du||_max', max(for_out.alpha_du_norm), '{:.2e}'),
                     # TODO: alphas, total_qp_iters here is for the current
@@ -341,8 +340,8 @@ class MPC(Module):
                 break
 
 
-        x = torch.cat(best['x'], dim=1)
-        u = torch.cat(best['u'], dim=1)
+        x = np.concatenate(best['x'], axis=1)
+        u = np.concatenate(best['u'], axis=1)
         full_du_norm = best['full_du_norm']
 
         # if isinstance(dx, LinDx):
@@ -401,22 +400,22 @@ class MPC(Module):
                 back_eps=self.back_eps,
                 no_op_forward=no_op_forward,
             )
-            e = torch.Tensor()
+            e = np.array([])
             x, u = _lqr(x_init, C, c, F, f if f is not None else e)
             return x, u, _lqr
         else:
             nsc = self.n_state + self.n_ctrl
             _n_state = nsc
             _nsc = _n_state + self.n_ctrl
-            n_batch = C.size(1)
-            _C = torch.zeros(self.T, n_batch, _nsc, _nsc).type_as(C)
-            half_gamI = self.slew_rate_penalty*torch.eye(
-                self.n_ctrl).unsqueeze(0).unsqueeze(0).repeat(self.T, n_batch, 1, 1)
+            n_batch = C.shape[1]
+            _C = np.zeros((self.T, n_batch, _nsc, _nsc), dtype='single')
+            half_gamI = np.expand_dims(np.expand_dims(self.slew_rate_penalty * np.eye(
+                self.n_ctrl), 0), 0).repeat(self.T, 0).repeat(n_batch, 1)
             _C[:,:,:self.n_ctrl,:self.n_ctrl] = half_gamI
             _C[:,:,-self.n_ctrl:,:self.n_ctrl] = -half_gamI
             _C[:,:,:self.n_ctrl,-self.n_ctrl:] = -half_gamI
             _C[:,:,-self.n_ctrl:,-self.n_ctrl:] = half_gamI
-            slew_C = _C.clone()
+            slew_C = _C.copy()
             _C = _C + torch.nn.ZeroPad2d((self.n_ctrl, 0, self.n_ctrl, 0))(C)
 
             _c = torch.cat((
@@ -535,13 +534,11 @@ More details: https://github.com/locuslab/mpc.pytorch/issues/12
     # @profile
     def linearize_dynamics(self, x, u, dynamics, diff):
         # TODO: Cleanup variable usage.
-
-        n_batch = x[0].size(0)
+        n_batch = x[0].shape[0]
 
         if self.grad_method == GradMethods.ANALYTIC:
-            _u = Variable(u[:-1].view(-1, self.n_ctrl), requires_grad=True)
-            _x = Variable(x[:-1].contiguous().view(-1, self.n_state),
-                          requires_grad=True)
+            _u = u[:-1].reshape(-1, self.n_ctrl)
+            _x = x[:-1].reshape(-1, self.n_state)
 
             # This inefficiently calls dynamics again, but is worth it because
             # we can efficiently compute grad_input for every time step at once.
@@ -557,14 +554,12 @@ More details: https://github.com/locuslab/mpc.pytorch/issues/12
             R, S = dynamics.grad_input(_x, _u)
 
             f = _new_x - util.bmv(R, _x) - util.bmv(S, _u)
-            f = f.view(self.T-1, n_batch, self.n_state)
+            f = f.reshape(self.T-1, n_batch, self.n_state)
 
-            R = R.contiguous().view(self.T-1, n_batch, self.n_state, self.n_state)
-            S = S.contiguous().view(self.T-1, n_batch, self.n_state, self.n_ctrl)
-            F = torch.cat((R, S), 3)
+            R = R.reshape(self.T-1, n_batch, self.n_state, self.n_state)
+            S = S.reshape(self.T-1, n_batch, self.n_state, self.n_ctrl)
+            F = np.concatenate((R, S), 3)
 
-            if not diff:
-                F, f = list(map(Variable, [F, f]))
             return F, f
         else:
             # TODO: This is inefficient and confusing.

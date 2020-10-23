@@ -22,9 +22,9 @@ matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 plt.style.use('bmh')
 
-P = torch.tensor([0.06, -0.18, 0.09, 0.52])
-I = torch.tensor([0.1, -0.27, 0.4, 0.4])
-D = torch.tensor([0.001, -0.01, 0.01, 0.04])
+P = np.array([0.06, -0.18, 0.09, 0.52], dtype='single')
+I = np.array([0.1, -0.27, 0.4, 0.4], dtype='single')
+D = np.array([0.001, -0.01, 0.01, 0.04], dtype='single')
 dt = 0.02
 NUM_ENSEMBLE_CONTROL = 1
 NUM_ENSEMBLE_PREDICT = 1
@@ -34,7 +34,7 @@ PATH_CONTROL = ['pathfiles/flight_model_net1_ctrl_256_1000_2layers_2his_noval.pt
                 'pathfiles/flight_model_net4_ctrl_256_1000_2layers_2his_noval.pth',
                 'pathfiles/flight_model_net5_ctrl_256_1000_2layers_2his_noval.pth']
 
-PATH_PREDICT = ['pathfiles/flight_model_net2_ctrl_256_1000_2layers_2his_noval.pth',
+PATH_PREDICT = ['pathfiles/flight_model_net1_ctrl_256_1000_2layers_2his_noval.pth',
                 'pathfiles/flight_model_net2_ctrl_256_1000_2layers_2his_noval.pth',
                 'pathfiles/flight_model_net3_ctrl_256_1000_2layers_2his_noval.pth',
                 'pathfiles/flight_model_net4_ctrl_256_1000_2layers_2his_noval.pth',
@@ -75,24 +75,25 @@ def main():
         dx_predict = Gemini_flight_dynamics.flight_dynamics(T, n_batch, NUM_ENSEMBLE_PREDICT, PATH_PREDICT)
         # END = time.time()
         # print('initialize model time:', END - START)
-        xinit = torch.tensor([-5.8489e-03,  4.3651e-02, -7.9248e-02, -8.5625e-02,  1.1335e-02,
-         3.1228e+00,  1.0082e-02, -6.1053e-02,  1.4188e-02, -7.4810e-03,
-         4.2597e-02, -7.3945e-02, -8.6181e-02,  1.2132e-02,  3.1227e+00,
-         1.2712e-02, -6.5020e-02,  1.2549e-02, -1.0209e-02,  4.1048e-02,
-        -6.6239e-02, -8.6811e-02,  1.3238e-02,  3.1226e+00, -7.5656e-03,
-        -5.4819e-02,  1.9917e-04,  1.3622e-01,  2.4634e-03,  1.0794e-03,
-         6.6767e-01,  1.3339e-01,  2.5716e-03,  3.0723e-03,  6.6944e-01]).unsqueeze(0).repeat(n_batch,1)
+        xinit = np.expand_dims(np.array([ 3.0953e-03,  3.8064e-03,  4.1662e-03, -7.4164e-02,  2.0541e-02,
+         3.1526e+00, -2.7789e-02,  4.7386e-02, -3.4559e-02,  5.2193e-04,
+         3.8532e-03,  3.3118e-03, -7.3201e-02,  2.0192e-02,  3.1536e+00,
+        -1.0387e-01, -1.9162e-02, -5.6059e-02, -2.5459e-03,  5.3939e-03,
+         1.8183e-03, -7.1328e-02,  2.0130e-02,  3.1550e+00, -4.6090e-02,
+         5.5544e-02, -7.8294e-02,  6.0124e-02, -2.6421e-02,  8.4291e-03,
+         6.8993e-01,  7.2849e-02, -1.3616e-02,  1.0076e-02,  6.9233e-01], dtype='single'), axis=0).repeat(n_batch, axis=0)
 
     else:
         assert False
 
     q, p = dx_control.get_true_obj()
 
-    u = dx_control.goal_ctrl.repeat(T, n_batch, 1)
+    u = np.tile(dx_control.goal_ctrl, (T, n_batch, 1))
     # u= None
     ep_length = 100
     x_plot = []
     u_plot = []
+    MPC_time = 0.
     # error_int = torch.zeros(T, n_batch, dx_control.n_ctrl)
     # prev_error = torch.zeros(T, n_batch, dx_control.n_ctrl)
     for t in range(ep_length):
@@ -101,9 +102,10 @@ def main():
             dx_control, xinit, q, p, T, dx_control.linesearch_decay, dx_control.max_linesearch_iter, u)
         end_ilqr = time.time()
         print('one step MPC:', end_ilqr - start_ilqr)
+        MPC_time += end_ilqr - start_ilqr
         # print('epoch:', t, '| u:', u[0])
-        x_plot.append(x.detach().numpy())
-        u_plot.append(u.detach().numpy())
+        x_plot.append(x)
+        u_plot.append(u)
         # error = torch.cat((dx_control.goal_state[6:9], dx_control.goal_state[2:3])).repeat(T, n_batch, 1) - torch.cat((x[:,:,6:9], x[:,:,2:3]), dim=2)
         # error_int = util.eclamp(error_int + I * error * dt, -torch.tensor([0.5, 0.5, 0.5, 0.5]).repeat(T, n_batch, 1), torch.tensor([0.5, 0.5, 0.5, 0.5]).repeat(T, n_batch, 1))
         # u = util.eclamp(P * error + error_int + D * (error - prev_error) / dt + dx_control.goal_ctrl.repeat(T, n_batch, 1), dx_control.lower, dx_control.upper)
@@ -114,9 +116,10 @@ def main():
         # u = dx_control.goal_ctrl.repeat(T, n_batch, 1)
         # u = u[0].repeat(T, n_batch, 1)
         # xinit = x[1]
-    trajectory_plot(x_plot, T)
-    action_plot(u_plot, T)
-    plt.show()
+    print('average mpc one step time:', MPC_time/ep_length)
+    # trajectory_plot(x_plot, T)
+    # action_plot(u_plot, T)
+    # plt.show()
 
 
 def solve_lqr(dx, xinit, q, p, T,
@@ -124,10 +127,8 @@ def solve_lqr(dx, xinit, q, p, T,
     n_sc = dx.n_state+dx.n_ctrl
 
     n_batch = 1
-    Q = torch.diag(q).unsqueeze(0).unsqueeze(0).repeat(
-        T, n_batch, 1, 1
-    )
-    p = p.unsqueeze(0).repeat(T, n_batch, 1)
+    Q = np.tile(np.diag(q), (T, n_batch, 1, 1))
+    p = np.tile(p, (T, n_batch, 1))
 
     # print(QuadCost(Q,p))
     lqr_iter = 1 if u_init is None else 1

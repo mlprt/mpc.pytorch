@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 from torch.autograd import Function, Variable
 from torch.nn import Module
 from torch.nn.parameter import Parameter
@@ -38,15 +39,15 @@ def bdiag(d):
 
 
 def bger(x, y):
-    return x.unsqueeze(2).bmm(y.unsqueeze(1))
+    return np.matmul(np.expand_dims(x, 2), np.expand_dims(y, 1))
 
 
 def bmv(X, y):
-    return X.bmm(y.unsqueeze(2)).squeeze(2)
+    return np.matmul(X, np.expand_dims(y, 2)).squeeze(2)
 
 
 def bquad(x, Q):
-    return x.unsqueeze(1).bmm(Q).bmm(x.unsqueeze(2)).squeeze(1).squeeze(1)
+    return np.matmul(np.matmul(np.expand_dims(x, 1), Q), np.expand_dims(x, 2)).squeeze(1).squeeze(1)
 
 
 def bdot(x, y):
@@ -56,10 +57,10 @@ def bdot(x, y):
 def eclamp(x, lower, upper):
     # In-place!!
     if type(lower) == type(x):
-        assert x.size() == lower.size()
+        assert x.shape == lower.shape
 
     if type(upper) == type(x):
-        assert x.size() == upper.size()
+        assert x.shape == upper.shape
 
     I = x < lower
     x[I] = lower[I] if not isinstance(lower, float) else lower
@@ -103,26 +104,26 @@ def get_traj(T, u, x_init, dynamics):
     from .mpc import QuadCost, LinDx # TODO: This is messy.
 
     if isinstance(dynamics, LinDx):
-        F = get_data_maybe(dynamics.F)
-        f = get_data_maybe(dynamics.f)
+        F = dynamics.F
+        f = dynamics.f
         if f is not None:
             assert f.shape == F.shape[:3]
 
-    x = [get_data_maybe(x_init)]
+    x = [x_init]
     for t in range(T):
         xt = x[t]
-        ut = get_data_maybe(u[t])
+        ut = u[t]
         if t < T-1:
             # new_x = f(Variable(xt), Variable(ut)).data
             if isinstance(dynamics, LinDx):
-                xut = torch.cat((xt, ut), 1)
+                xut = np.concatenate((xt, ut), 1)
                 new_x = bmv(F[t], xut)
                 if f is not None:
                     new_x += f[t]
             else:
-                new_x = dynamics(Variable(xt), Variable(ut)).data
+                new_x = dynamics(xt, ut)
             x.append(new_x)
-    x = torch.stack(x, dim=0)
+    x = np.stack(x, axis=0)
     return x
 
 
@@ -132,8 +133,8 @@ def get_cost(T, u, cost, dynamics=None, x_init=None, x=None):
     assert x_init is not None or x is not None
 
     if isinstance(cost, QuadCost):
-        C = get_data_maybe(cost.C)
-        c = get_data_maybe(cost.c)
+        C = cost.C
+        c = cost.c
 
     if x is None:
         x = get_traj(T, u, x_init, dynamics)
@@ -142,16 +143,16 @@ def get_cost(T, u, cost, dynamics=None, x_init=None, x=None):
     for t in range(T):
         xt = x[t]
         ut = u[t]
-        xut = torch.cat((xt, ut), 1)
+        xut = np.concatenate((xt, ut), 1)
         if isinstance(cost, QuadCost):
             # obj = 0.5*bquad(xut, C[t]) + bdot(xut, c[t]) + \
             #       0.5*bquad(torch.cat((dynamics.goal_state.repeat(1,1), dynamics.goal_ctrl.repeat(1,1)), dim=1), C[t])
-            obj = 0.5 * bquad(xut - torch.cat((dynamics.goal_state.repeat(1,1), dynamics.goal_ctrl.repeat(1,1)), dim=1), C[t])
+            obj = 0.5 * bquad(xut - np.concatenate((np.expand_dims(dynamics.goal_state, 0), np.expand_dims(dynamics.goal_ctrl, 0)), axis=1), C[t])
         else:
             obj = cost(xut)
         objs.append(obj)
-    objs = torch.stack(objs, dim=0)
-    total_obj = torch.sum(objs, dim=0)
+    # objs = np.stack(objs, dim=0)
+    total_obj = np.sum(objs, axis=0)
     return total_obj
 
 
